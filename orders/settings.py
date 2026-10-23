@@ -53,6 +53,8 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
+AUTH_USER_MODEL = 'backend.User'
+
 ROOT_URLCONF = 'orders.urls'
 
 TEMPLATES = [
