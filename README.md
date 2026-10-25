@@ -32,3 +32,17 @@ python manage.py import_products
 ```bash
 python manage.py test
 ```
+
+## API
+
+Все методы начинаются с `/api/v1/`, данные передаются в теле запроса.
+
+| Метод | Адрес | Описание |
+|---|---|---|
+| POST | `user/register` | Регистрация (`first_name`, `last_name`, `email`, `password`, `company`, `position`, `type`); токен подтверждения приходит на email |
+| POST | `user/register/confirm` | Подтверждение email (`email`, `token`) |
+| POST | `user/login` | Вход (`email`, `password`), возвращает токен авторизации |
+| POST | `user/password_reset` | Запрос сброса пароля (`email`) |
+| POST | `user/password_reset/confirm` | Новый пароль (`email`, `token`, `password`) |
+
+Авторизованные запросы отправляются с заголовком `Authorization: Token <токен>`.
