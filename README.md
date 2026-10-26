@@ -44,5 +44,9 @@ python manage.py test
 | POST | `user/login` | Вход (`email`, `password`), возвращает токен авторизации |
 | POST | `user/password_reset` | Запрос сброса пароля (`email`) |
 | POST | `user/password_reset/confirm` | Новый пароль (`email`, `token`, `password`) |
+| GET | `categories` | Список категорий |
+| GET | `shops` | Магазины, принимающие заказы |
+| GET | `products` | Список товаров; фильтры `shop_id`, `category_id`, `search` |
+| GET | `products/<id>` | Карточка товара с характеристиками |
 
 Авторизованные запросы отправляются с заголовком `Authorization: Token <токен>`.

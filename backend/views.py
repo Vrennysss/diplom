@@ -6,14 +6,16 @@ from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
 from rest_framework import status
 from rest_framework.authtoken.models import Token
+from rest_framework.generics import ListAPIView, RetrieveAPIView
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from backend.models import ConfirmEmailToken, User
+from backend.models import Category, ConfirmEmailToken, ProductInfo, Shop, User
 from backend.serializers import (
-    EmailConfirmSerializer, LoginSerializer, PasswordResetConfirmSerializer,
-    PasswordResetSerializer, RegisterSerializer,
+    CategorySerializer, EmailConfirmSerializer, LoginSerializer, PasswordResetConfirmSerializer,
+    PasswordResetSerializer, ProductInfoSerializer, RegisterSerializer,
+    ShopSerializer,
 )
 
 
@@ -126,3 +128,44 @@ class PasswordResetConfirmView(APIView):
         user.save()
         Token.objects.filter(user=user).delete()
         return Response({'status': True})
+
+
+class CategoryListView(ListAPIView):
+    permission_classes = [AllowAny]
+    queryset = Category.objects.all()
+    serializer_class = CategorySerializer
+
+
+class ShopListView(ListAPIView):
+    permission_classes = [AllowAny]
+    queryset = Shop.objects.filter(state=True)
+    serializer_class = ShopSerializer
+
+
+class ProductInfoQuerysetMixin:
+    permission_classes = [AllowAny]
+    serializer_class = ProductInfoSerializer
+
+    def get_queryset(self):
+        return ProductInfo.objects.filter(shop__state=True).select_related(
+            'product__category', 'shop'
+        ).prefetch_related('product_parameters__parameter')
+
+
+class ProductListView(ProductInfoQuerysetMixin, ListAPIView):
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        shop_id = self.request.query_params.get('shop_id')
+        category_id = self.request.query_params.get('category_id')
+        search = self.request.query_params.get('search')
+        if shop_id:
+            queryset = queryset.filter(shop_id=shop_id)
+        if category_id:
+            queryset = queryset.filter(product__category_id=category_id)
+        if search:
+            queryset = queryset.filter(product__name__icontains=search)
+        return queryset.distinct()
+
+
+class ProductDetailView(ProductInfoQuerysetMixin, RetrieveAPIView):
+    pass

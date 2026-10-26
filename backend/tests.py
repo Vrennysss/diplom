@@ -100,3 +100,36 @@ class AuthTest(APITestCase):
         self.assertEqual(response.status_code, 200)
         user.refresh_from_db()
         self.assertTrue(user.check_password('An0ther-pass-456'))
+
+
+class ProductTest(APITestCase):
+    def setUp(self):
+        import_shop_file(settings.BASE_DIR / 'data' / 'shop1.yaml')
+
+    def test_product_list(self):
+        response = self.client.get(reverse('backend:products'))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.json()), 14)
+
+    def test_product_list_filter_by_category(self):
+        category = Category.objects.get(name='Смартфоны')
+        response = self.client.get(
+            reverse('backend:products'), {'category_id': category.id}
+        )
+        self.assertTrue(response.json())
+        self.assertTrue(
+            all(item['category'] == 'Смартфоны' for item in response.json())
+        )
+
+    def test_product_list_hides_closed_shop(self):
+        Shop.objects.update(state=False)
+        response = self.client.get(reverse('backend:products'))
+        self.assertEqual(response.json(), [])
+
+    def test_product_detail(self):
+        product_info = ProductInfo.objects.first()
+        response = self.client.get(
+            reverse('backend:product-detail', args=[product_info.id])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('product_parameters', response.json())
