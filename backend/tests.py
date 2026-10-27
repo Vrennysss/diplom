@@ -6,7 +6,8 @@ from django.urls import reverse
 from rest_framework.test import APITestCase
 
 from backend.models import (
-    Category, ConfirmEmailToken, ProductInfo, ProductParameter, Shop, User,
+    Category, ConfirmEmailToken, Contact, OrderItem, ProductInfo,
+    ProductParameter, Shop, User,
 )
 from backend.services import import_shop_file
 
@@ -133,3 +134,71 @@ class ProductTest(APITestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn('product_parameters', response.json())
+
+
+class BasketTest(APITestCase):
+    def setUp(self):
+        import_shop_file(settings.BASE_DIR / 'data' / 'shop1.yaml')
+        self.user = User.objects.create_user(
+            email='buyer@example.com', password='Str0ng-pass-123',
+            is_active=True,
+        )
+        self.client.force_authenticate(self.user)
+        self.product_info = ProductInfo.objects.first()
+
+    def add_to_basket(self, quantity=1):
+        return self.client.post(
+            reverse('backend:basket'),
+            {'items': [{'product_info': self.product_info.id,
+                        'quantity': quantity}]},
+            format='json',
+        )
+
+    def test_basket_requires_auth(self):
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.get(reverse('backend:basket')).status_code, 401)
+
+    def test_add_to_basket(self):
+        self.assertEqual(self.add_to_basket(2).status_code, 201)
+        response = self.client.get(reverse('backend:basket'))
+        self.assertEqual(len(response.json()['ordered_items']), 1)
+        self.assertEqual(
+            response.json()['total_sum'], self.product_info.price * 2
+        )
+
+    def test_add_more_than_in_stock(self):
+        response = self.add_to_basket(self.product_info.quantity + 1)
+        self.assertEqual(response.status_code, 400)
+
+    def test_update_and_delete_items(self):
+        self.add_to_basket(1)
+        self.client.put(
+            reverse('backend:basket'),
+            {'items': [{'product_info': self.product_info.id,
+                        'quantity': 3}]},
+            format='json',
+        )
+        item = OrderItem.objects.get()
+        self.assertEqual(item.quantity, 3)
+        response = self.client.delete(
+            reverse('backend:basket'), {'items': [item.id]}, format='json'
+        )
+        self.assertEqual(response.json()['deleted'], 1)
+        self.assertFalse(OrderItem.objects.exists())
+
+    def test_contacts(self):
+        data = {'city': 'Москва', 'street': 'Тверская', 'house': '1',
+                'phone': '+79990000000'}
+        response = self.client.post(reverse('backend:user-contact'), data)
+        self.assertEqual(response.status_code, 201)
+        contact = Contact.objects.get()
+        self.client.put(
+            reverse('backend:user-contact'), {'id': contact.id, 'house': '2'}
+        )
+        contact.refresh_from_db()
+        self.assertEqual(contact.house, '2')
+        response = self.client.delete(
+            reverse('backend:user-contact'), {'items': [contact.id]},
+            format='json',
+        )
+        self.assertEqual(response.json()['deleted'], 1)

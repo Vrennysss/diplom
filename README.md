@@ -48,5 +48,7 @@ python manage.py test
 | GET | `shops` | Магазины, принимающие заказы |
 | GET | `products` | Список товаров; фильтры `shop_id`, `category_id`, `search` |
 | GET | `products/<id>` | Карточка товара с характеристиками |
+| GET, POST, PUT, DELETE | `user/contact` | Адреса доставки (нужна авторизация); в DELETE передаётся `items` со списком id |
+| GET, POST, PUT, DELETE | `basket` | Корзина (нужна авторизация); в теле `items`: `[{"product_info": id, "quantity": n}]`, для DELETE — список id позиций |
 
 Авторизованные запросы отправляются с заголовком `Authorization: Token <токен>`.

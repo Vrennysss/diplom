@@ -1,9 +1,9 @@
 from django.urls import path
 
 from backend.views import (
-    CategoryListView, ConfirmEmailView, LoginView, PasswordResetConfirmView,
-    PasswordResetView, ProductDetailView, ProductListView, RegisterView,
-    ShopListView,
+    BasketView, CategoryListView, ConfirmEmailView, ContactView, LoginView,
+    PasswordResetConfirmView, PasswordResetView, ProductDetailView,
+    ProductListView, RegisterView, ShopListView,
 )
 
 app_name = 'backend'
@@ -22,4 +22,6 @@ urlpatterns = [
     path('products', ProductListView.as_view(), name='products'),
     path('products/<int:pk>', ProductDetailView.as_view(),
          name='product-detail'),
+    path('user/contact', ContactView.as_view(), name='user-contact'),
+    path('basket', BasketView.as_view(), name='basket'),
 ]

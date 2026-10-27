@@ -11,11 +11,14 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from backend.models import Category, ConfirmEmailToken, ProductInfo, Shop, User
+from backend.models import (
+    Category, ConfirmEmailToken, Order, OrderItem, ProductInfo, Shop, User,
+)
 from backend.serializers import (
-    CategorySerializer, EmailConfirmSerializer, LoginSerializer, PasswordResetConfirmSerializer,
-    PasswordResetSerializer, ProductInfoSerializer, RegisterSerializer,
-    ShopSerializer,
+    CategorySerializer, ContactSerializer, EmailConfirmSerializer,
+    LoginSerializer, OrderItemCreateSerializer, OrderSerializer,
+    PasswordResetConfirmSerializer, PasswordResetSerializer,
+    ProductInfoSerializer, RegisterSerializer, ShopSerializer,
 )
 
 
@@ -169,3 +172,92 @@ class ProductListView(ProductInfoQuerysetMixin, ListAPIView):
 
 class ProductDetailView(ProductInfoQuerysetMixin, RetrieveAPIView):
     pass
+
+
+class ContactView(APIView):
+    def get(self, request):
+        contacts = request.user.contacts.all()
+        return Response(ContactSerializer(contacts, many=True).data)
+
+    def post(self, request):
+        serializer = ContactSerializer(data=request.data)
+        if not serializer.is_valid():
+            return error_response(serializer.errors)
+        serializer.save(user=request.user)
+        return Response({'status': True}, status=status.HTTP_201_CREATED)
+
+    def put(self, request):
+        contact = request.user.contacts.filter(id=request.data.get('id')).first()
+        if contact is None:
+            return error_response('Контакт не найден', status.HTTP_404_NOT_FOUND)
+        serializer = ContactSerializer(contact, data=request.data, partial=True)
+        if not serializer.is_valid():
+            return error_response(serializer.errors)
+        serializer.save()
+        return Response({'status': True})
+
+    def delete(self, request):
+        ids = request.data.get('items')
+        if not isinstance(ids, list):
+            return error_response('Не указаны items')
+        deleted, _ = request.user.contacts.filter(id__in=ids).delete()
+        return Response({'status': True, 'deleted': deleted})
+
+
+class BasketView(APIView):
+    def get_basket(self, user):
+        basket, _ = Order.objects.get_or_create(user=user, state='basket')
+        return basket
+
+    def parse_items(self, request):
+        items = request.data.get('items')
+        if not isinstance(items, list) or not items:
+            return None, error_response('Не указаны items')
+        serializer = OrderItemCreateSerializer(data=items, many=True)
+        if not serializer.is_valid():
+            return None, error_response(serializer.errors)
+        return serializer.validated_data, None
+
+    def get(self, request):
+        basket = self.get_basket(request.user)
+        return Response(OrderSerializer(basket).data)
+
+    def post(self, request):
+        items, error = self.parse_items(request)
+        if error:
+            return error
+        basket = self.get_basket(request.user)
+        for item in items:
+            order_item, created = OrderItem.objects.get_or_create(
+                order=basket, product_info=item['product_info'],
+                defaults={'quantity': item['quantity']},
+            )
+            if not created:
+                order_item.quantity = min(
+                    order_item.quantity + item['quantity'],
+                    item['product_info'].quantity,
+                )
+                order_item.save()
+        return Response({'status': True}, status=status.HTTP_201_CREATED)
+
+    def put(self, request):
+        items, error = self.parse_items(request)
+        if error:
+            return error
+        basket = self.get_basket(request.user)
+        updated = 0
+        for item in items:
+            updated += OrderItem.objects.filter(
+                order=basket, product_info=item['product_info']
+            ).update(quantity=item['quantity'])
+        return Response({'status': True, 'updated': updated})
+
+    def delete(self, request):
+        ids = request.data.get('items')
+        if not isinstance(ids, list):
+            return error_response('Не указаны items')
+        basket = self.get_basket(request.user)
+        deleted, _ = OrderItem.objects.filter(
+            order=basket, id__in=ids
+        ).delete()
+        return Response({'status': True, 'deleted': deleted})
