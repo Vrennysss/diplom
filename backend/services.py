@@ -1,4 +1,6 @@
 import yaml
+from django.conf import settings
+from django.core.mail import send_mail
 from django.db import transaction
 
 from backend.models import (
@@ -48,3 +50,34 @@ def import_shop_file(path, user=None):
     with open(path, encoding='utf-8') as file:
         data = yaml.safe_load(file)
     return import_shop_data(data, user)
+
+
+def build_order_text(order):
+    lines = [f'Заказ №{order.id} от {order.dt:%d.%m.%Y %H:%M}']
+    for item in order.ordered_items.select_related(
+        'product_info__product', 'product_info__shop'
+    ):
+        info = item.product_info
+        lines.append(
+            f'{info.product.name} ({info.shop.name}): '
+            f'{item.quantity} x {info.price} = {item.quantity * info.price}'
+        )
+    lines.append(f'Итого: {order.total_sum}')
+    contact = order.contact
+    lines.append(
+        f'Доставка: {contact.city}, {contact.street}, д. {contact.house}, '
+        f'кв. {contact.apartment}, тел. {contact.phone}'
+    )
+    return '\n'.join(lines)
+
+
+def send_order_emails(order):
+    text = build_order_text(order)
+    send_mail(
+        f'Заказ №{order.id} принят', text, settings.DEFAULT_FROM_EMAIL,
+        [order.user.email],
+    )
+    send_mail(
+        f'Накладная по заказу №{order.id}', text, settings.DEFAULT_FROM_EMAIL,
+        [settings.ADMIN_EMAIL],
+    )

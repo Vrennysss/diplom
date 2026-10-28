@@ -4,6 +4,8 @@ from django.contrib.auth.password_validation import validate_password
 from django.contrib.auth.tokens import default_token_generator
 from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
+from django.db import transaction
+from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.generics import ListAPIView, RetrieveAPIView
@@ -16,10 +18,12 @@ from backend.models import (
 )
 from backend.serializers import (
     CategorySerializer, ContactSerializer, EmailConfirmSerializer,
-    LoginSerializer, OrderItemCreateSerializer, OrderSerializer,
+    LoginSerializer, OrderConfirmSerializer, OrderItemCreateSerializer,
+    OrderSerializer,
     PasswordResetConfirmSerializer, PasswordResetSerializer,
     ProductInfoSerializer, RegisterSerializer, ShopSerializer,
 )
+from backend.services import send_order_emails
 
 
 def error_response(message, code=status.HTTP_400_BAD_REQUEST):
@@ -261,3 +265,65 @@ class BasketView(APIView):
             order=basket, id__in=ids
         ).delete()
         return Response({'status': True, 'deleted': deleted})
+
+
+class OrderView(APIView):
+    def get(self, request):
+        orders = Order.objects.filter(user=request.user).exclude(
+            state='basket'
+        ).select_related('contact').prefetch_related(
+            'ordered_items__product_info__product__category',
+            'ordered_items__product_info__shop',
+            'ordered_items__product_info__product_parameters__parameter',
+        )
+        return Response(OrderSerializer(orders, many=True).data)
+
+    def post(self, request):
+        serializer = OrderConfirmSerializer(data=request.data)
+        if not serializer.is_valid():
+            return error_response(serializer.errors)
+
+        contact = request.user.contacts.filter(
+            id=serializer.validated_data['contact']
+        ).first()
+        if contact is None:
+            return error_response('Контакт не найден')
+
+        with transaction.atomic():
+            basket = Order.objects.filter(
+                user=request.user, state='basket'
+            ).first()
+            items = []
+            if basket is not None:
+                items = list(basket.ordered_items.select_related(
+                    'product_info__product', 'product_info__shop'
+                ))
+            if not items:
+                return error_response('Корзина пуста')
+            for item in items:
+                info = item.product_info
+                if not info.shop.state:
+                    return error_response(
+                        f'Магазин {info.shop.name} не принимает заказы'
+                    )
+                if item.quantity > info.quantity:
+                    return error_response(
+                        f'Недостаточно товара: {info.product.name}'
+                    )
+            for item in items:
+                item.product_info.quantity -= item.quantity
+                item.product_info.save()
+            basket.contact = contact
+            basket.state = 'new'
+            basket.save()
+
+        send_order_emails(basket)
+        return Response({'status': True, 'order': basket.id})
+
+
+class OrderDetailView(APIView):
+    def get(self, request, pk):
+        order = get_object_or_404(
+            Order.objects.exclude(state='basket'), pk=pk, user=request.user
+        )
+        return Response(OrderSerializer(order).data)

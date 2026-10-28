@@ -6,7 +6,7 @@ from django.urls import reverse
 from rest_framework.test import APITestCase
 
 from backend.models import (
-    Category, ConfirmEmailToken, Contact, OrderItem, ProductInfo,
+    Category, ConfirmEmailToken, Contact, Order, OrderItem, ProductInfo,
     ProductParameter, Shop, User,
 )
 from backend.services import import_shop_file
@@ -202,3 +202,79 @@ class BasketTest(APITestCase):
             format='json',
         )
         self.assertEqual(response.json()['deleted'], 1)
+
+
+class OrderTest(APITestCase):
+    def setUp(self):
+        import_shop_file(settings.BASE_DIR / 'data' / 'shop1.yaml')
+        self.user = User.objects.create_user(
+            email='buyer@example.com', password='Str0ng-pass-123',
+            is_active=True,
+        )
+        self.client.force_authenticate(self.user)
+        self.product_info = ProductInfo.objects.first()
+        self.contact = Contact.objects.create(
+            user=self.user, city='Москва', street='Тверская', house='1',
+            apartment='5', phone='+79990000000',
+        )
+
+    def add_to_basket(self, quantity=1):
+        self.client.post(
+            reverse('backend:basket'),
+            {'items': [{'product_info': self.product_info.id,
+                        'quantity': quantity}]},
+            format='json',
+        )
+
+    def confirm_order(self, contact_id=None):
+        return self.client.post(
+            reverse('backend:order'),
+            {'contact': contact_id or self.contact.id},
+        )
+
+    def test_confirm_order(self):
+        self.add_to_basket(2)
+        stock = self.product_info.quantity
+        mail.outbox.clear()
+        response = self.confirm_order()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 2)
+        self.assertEqual(mail.outbox[0].to, [self.user.email])
+        self.assertEqual(mail.outbox[1].to, [settings.ADMIN_EMAIL])
+        self.assertEqual(Order.objects.get().state, 'new')
+        self.product_info.refresh_from_db()
+        self.assertEqual(self.product_info.quantity, stock - 2)
+
+    def test_confirm_empty_basket(self):
+        self.assertEqual(self.confirm_order().status_code, 400)
+
+    def test_confirm_foreign_contact(self):
+        self.add_to_basket()
+        other = User.objects.create_user(email='other@example.com', password='x')
+        contact = Contact.objects.create(
+            user=other, city='Казань', street='Баумана', phone='1'
+        )
+        self.assertEqual(self.confirm_order(contact.id).status_code, 400)
+
+    def test_order_list_and_detail(self):
+        self.add_to_basket()
+        order_id = self.confirm_order().json()['order']
+        response = self.client.get(reverse('backend:order'))
+        self.assertEqual(len(response.json()), 1)
+        response = self.client.get(
+            reverse('backend:order-detail', args=[order_id])
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['contact']['city'], 'Москва')
+
+    def test_detail_of_foreign_order_not_found(self):
+        self.add_to_basket()
+        order_id = self.confirm_order().json()['order']
+        other = User.objects.create_user(
+            email='other@example.com', password='x', is_active=True
+        )
+        self.client.force_authenticate(other)
+        response = self.client.get(
+            reverse('backend:order-detail', args=[order_id])
+        )
+        self.assertEqual(response.status_code, 404)

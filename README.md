@@ -50,5 +50,7 @@ python manage.py test
 | GET | `products/<id>` | Карточка товара с характеристиками |
 | GET, POST, PUT, DELETE | `user/contact` | Адреса доставки (нужна авторизация); в DELETE передаётся `items` со списком id |
 | GET, POST, PUT, DELETE | `basket` | Корзина (нужна авторизация); в теле `items`: `[{"product_info": id, "quantity": n}]`, для DELETE — список id позиций |
+| GET, POST | `order` | GET — список заказов; POST — подтверждение корзины (`contact` — id адреса), клиенту уходит подтверждение, администратору накладная |
+| GET | `order/<id>` | Детали заказа |
 
 Авторизованные запросы отправляются с заголовком `Authorization: Token <токен>`.

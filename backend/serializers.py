@@ -118,8 +118,15 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
 class OrderSerializer(serializers.ModelSerializer):
     ordered_items = OrderItemSerializer(many=True, read_only=True)
+    contact = ContactSerializer(read_only=True)
     total_sum = serializers.IntegerField(read_only=True)
 
     class Meta:
         model = Order
-        fields = ('id', 'state', 'dt', 'ordered_items', 'total_sum')
+        fields = (
+            'id', 'state', 'dt', 'contact', 'ordered_items', 'total_sum',
+        )
+
+
+class OrderConfirmSerializer(serializers.Serializer):
+    contact = serializers.IntegerField()
