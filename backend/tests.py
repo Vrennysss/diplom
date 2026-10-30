@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.contrib.auth.tokens import default_token_generator
 from django.core import mail
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APITestCase
@@ -277,4 +278,92 @@ class OrderTest(APITestCase):
         response = self.client.get(
             reverse('backend:order-detail', args=[order_id])
         )
+        self.assertEqual(response.status_code, 404)
+
+
+class PartnerTest(APITestCase):
+    def setUp(self):
+        self.partner = User.objects.create_user(
+            email='shop@example.com', password='Str0ng-pass-123',
+            is_active=True, type='shop',
+        )
+        self.client.force_authenticate(self.partner)
+
+    def upload(self):
+        with open(settings.BASE_DIR / 'data' / 'shop1.yaml', 'rb') as file:
+            return self.client.post(
+                reverse('backend:partner-update'), {'file': file},
+                format='multipart',
+            )
+
+    def test_buyer_has_no_access(self):
+        buyer = User.objects.create_user(
+            email='buyer@example.com', password='x', is_active=True
+        )
+        self.client.force_authenticate(buyer)
+        response = self.client.get(reverse('backend:partner-state'))
+        self.assertEqual(response.status_code, 403)
+
+    def test_update_price(self):
+        self.assertEqual(self.upload().status_code, 200)
+        shop = Shop.objects.get()
+        self.assertEqual(shop.user, self.partner)
+        self.assertEqual(shop.product_infos.count(), 14)
+
+    def test_update_with_invalid_file(self):
+        response = self.client.post(
+            reverse('backend:partner-update'),
+            {'file': SimpleUploadedFile('bad.yaml', b'shop: x')},
+            format='multipart',
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_reimport_keeps_ordered_items(self):
+        self.upload()
+        buyer = User.objects.create_user(
+            email='buyer@example.com', password='x', is_active=True
+        )
+        order = Order.objects.create(user=buyer, state='new')
+        OrderItem.objects.create(
+            order=order, product_info=ProductInfo.objects.first(), quantity=1
+        )
+        self.upload()
+        self.assertEqual(OrderItem.objects.count(), 1)
+
+    def test_change_state(self):
+        self.upload()
+        url = reverse('backend:partner-state')
+        self.client.post(url, {'state': False}, format='json')
+        self.assertFalse(self.client.get(url).json()['state'])
+
+    def test_orders_and_status_change(self):
+        self.upload()
+        buyer = User.objects.create_user(
+            email='buyer@example.com', password='x', is_active=True
+        )
+        order = Order.objects.create(user=buyer, state='new')
+        OrderItem.objects.create(
+            order=order, product_info=ProductInfo.objects.first(), quantity=2
+        )
+        response = self.client.get(reverse('backend:partner-orders'))
+        self.assertEqual(len(response.json()), 1)
+        response = self.client.put(
+            reverse('backend:partner-order-state', args=[order.id]),
+            {'state': 'sent'}, format='json',
+        )
+        self.assertEqual(response.status_code, 200)
+        order.refresh_from_db()
+        self.assertEqual(order.state, 'sent')
+
+    def test_state_without_shop(self):
+        self.upload()
+        other = User.objects.create_user(
+            email='other@example.com', password='x', is_active=True,
+            type='shop',
+        )
+        self.client.force_authenticate(other)
+        self.client.post(
+            reverse('backend:partner-state'), {'state': True}, format='json'
+        )
+        response = self.client.get(reverse('backend:partner-state'))
         self.assertEqual(response.status_code, 404)

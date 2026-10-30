@@ -8,47 +8,80 @@ from backend.models import (
 )
 
 
+def get_shop_for_import(name, user):
+    if user is None:
+        shop, _ = Shop.objects.get_or_create(name=name)
+        return shop
+
+    own_shop = Shop.objects.filter(user=user).first()
+    if own_shop is not None:
+        if own_shop.name != name:
+            raise ValueError('Название магазина в файле не совпадает с вашим')
+        return own_shop
+
+    shop, _ = Shop.objects.get_or_create(name=name)
+    if shop.user_id is not None:
+        raise ValueError('Магазин принадлежит другому пользователю')
+    shop.user = user
+    shop.save()
+    return shop
+
+
 @transaction.atomic
 def import_shop_data(data, user=None):
-    """Загружает прайс магазина из словаря, заменяя прежние предложения."""
-    shop, _ = Shop.objects.get_or_create(
-        name=data['shop'], defaults={'user': user}
-    )
-    if user is not None and shop.user_id not in (None, user.id):
-        raise ValueError('Магазин принадлежит другому пользователю')
+    """Загружает прайс магазина из словаря, обновляя прежние предложения."""
+    try:
+        shop = get_shop_for_import(data['shop'], user)
 
-    for item in data['categories']:
-        category, _ = Category.objects.get_or_create(
-            id=item['id'], defaults={'name': item['name']}
-        )
-        category.shops.add(shop)
-
-    ProductInfo.objects.filter(shop=shop).delete()
-
-    for item in data['goods']:
-        product, _ = Product.objects.get_or_create(
-            name=item['name'], category_id=item['category']
-        )
-        product_info = ProductInfo.objects.create(
-            product=product,
-            shop=shop,
-            external_id=item['id'],
-            model=item.get('model', ''),
-            price=item['price'],
-            price_rrc=item['price_rrc'],
-            quantity=item['quantity'],
-        )
-        for name, value in item.get('parameters', {}).items():
-            parameter, _ = Parameter.objects.get_or_create(name=name)
-            ProductParameter.objects.create(
-                product_info=product_info, parameter=parameter, value=value
+        for item in data['categories']:
+            category, _ = Category.objects.get_or_create(
+                id=item['id'], defaults={'name': item['name']}
             )
+            category.shops.add(shop)
+
+        imported_ids = []
+        for item in data['goods']:
+            product, _ = Product.objects.get_or_create(
+                name=item['name'], category_id=item['category']
+            )
+            product_info, _ = ProductInfo.objects.update_or_create(
+                shop=shop,
+                external_id=item['id'],
+                defaults={
+                    'product': product,
+                    'model': item.get('model', ''),
+                    'price': item['price'],
+                    'price_rrc': item['price_rrc'],
+                    'quantity': item['quantity'],
+                },
+            )
+            imported_ids.append(item['id'])
+            product_info.product_parameters.all().delete()
+            for name, value in item.get('parameters', {}).items():
+                parameter, _ = Parameter.objects.get_or_create(name=name)
+                ProductParameter.objects.create(
+                    product_info=product_info, parameter=parameter,
+                    value=value,
+                )
+    except (KeyError, TypeError, AttributeError):
+        raise ValueError('Неверный формат файла')
+
+    ProductInfo.objects.filter(shop=shop).exclude(
+        external_id__in=imported_ids
+    ).update(quantity=0)
     return shop
 
 
 def import_shop_file(path, user=None):
     with open(path, encoding='utf-8') as file:
-        data = yaml.safe_load(file)
+        return import_shop_stream(file, user)
+
+
+def import_shop_stream(stream, user=None):
+    try:
+        data = yaml.safe_load(stream)
+    except yaml.YAMLError:
+        raise ValueError('Файл не является корректным YAML')
     return import_shop_data(data, user)
 
 

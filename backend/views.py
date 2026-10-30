@@ -9,7 +9,8 @@ from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.authtoken.models import Token
 from rest_framework.generics import ListAPIView, RetrieveAPIView
-from rest_framework.permissions import AllowAny
+from rest_framework.parsers import MultiPartParser
+from rest_framework.permissions import AllowAny, BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -19,11 +20,12 @@ from backend.models import (
 from backend.serializers import (
     CategorySerializer, ContactSerializer, EmailConfirmSerializer,
     LoginSerializer, OrderConfirmSerializer, OrderItemCreateSerializer,
-    OrderSerializer,
+    OrderSerializer, OrderStateSerializer, PartnerOrderSerializer,
     PasswordResetConfirmSerializer, PasswordResetSerializer,
     ProductInfoSerializer, RegisterSerializer, ShopSerializer,
+    ShopStateSerializer,
 )
-from backend.services import send_order_emails
+from backend.services import import_shop_stream, send_order_emails
 
 
 def error_response(message, code=status.HTTP_400_BAD_REQUEST):
@@ -327,3 +329,90 @@ class OrderDetailView(APIView):
             Order.objects.exclude(state='basket'), pk=pk, user=request.user
         )
         return Response(OrderSerializer(order).data)
+
+
+class IsShop(BasePermission):
+    message = 'Только для магазинов'
+
+    def has_permission(self, request, view):
+        return bool(
+            request.user and request.user.is_authenticated
+            and request.user.type == 'shop'
+        )
+
+
+class PartnerUpdateView(APIView):
+    permission_classes = [IsShop]
+    parser_classes = [MultiPartParser]
+
+    def post(self, request):
+        file = request.FILES.get('file')
+        if file is None:
+            return error_response('Не указан файл')
+        try:
+            shop = import_shop_stream(file, request.user)
+        except ValueError as error:
+            return error_response(str(error))
+        return Response({'status': True, 'shop': shop.name})
+
+
+class PartnerStateView(APIView):
+    permission_classes = [IsShop]
+
+    def get_shop(self, request):
+        return Shop.objects.filter(user=request.user).first()
+
+    def get(self, request):
+        shop = self.get_shop(request)
+        if shop is None:
+            return error_response('Магазин не найден', status.HTTP_404_NOT_FOUND)
+        return Response(ShopSerializer(shop).data)
+
+    def post(self, request):
+        shop = self.get_shop(request)
+        if shop is None:
+            return error_response('Магазин не найден', status.HTTP_404_NOT_FOUND)
+        serializer = ShopStateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return error_response(serializer.errors)
+        shop.state = serializer.validated_data['state']
+        shop.save()
+        return Response({'status': True})
+
+
+class PartnerOrdersView(APIView):
+    permission_classes = [IsShop]
+
+    def get_shop_orders(self, shop):
+        return Order.objects.filter(
+            ordered_items__product_info__shop=shop
+        ).exclude(state='basket').distinct().select_related(
+            'contact'
+        ).prefetch_related(
+            'ordered_items__product_info__product__category',
+            'ordered_items__product_info__shop',
+            'ordered_items__product_info__product_parameters__parameter',
+        )
+
+    def get(self, request):
+        shop = Shop.objects.filter(user=request.user).first()
+        if shop is None:
+            return error_response('Магазин не найден', status.HTTP_404_NOT_FOUND)
+        orders = self.get_shop_orders(shop)
+        return Response(
+            PartnerOrderSerializer(
+                orders, many=True, context={'shop': shop}
+            ).data
+        )
+
+    def put(self, request, pk):
+        shop = Shop.objects.filter(user=request.user).first()
+        if shop is None:
+            return error_response('Магазин не найден', status.HTTP_404_NOT_FOUND)
+        order = get_object_or_404(self.get_shop_orders(shop), pk=pk)
+        serializer = OrderStateSerializer(data=request.data)
+        if not serializer.is_valid():
+            return error_response(serializer.errors)
+        order.state = serializer.validated_data['state']
+        order.save()
+        return Response({'status': True})

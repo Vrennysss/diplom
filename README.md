@@ -52,5 +52,9 @@ python manage.py test
 | GET, POST, PUT, DELETE | `basket` | Корзина (нужна авторизация); в теле `items`: `[{"product_info": id, "quantity": n}]`, для DELETE — список id позиций |
 | GET, POST | `order` | GET — список заказов; POST — подтверждение корзины (`contact` — id адреса), клиенту уходит подтверждение, администратору накладная |
 | GET | `order/<id>` | Детали заказа |
+| POST | `partner/update` | Поставщик: загрузка прайса, YAML-файл в поле `file` (multipart) |
+| GET, POST | `partner/state` | Поставщик: статус приёма заказов, в POST — `state` (true/false) |
+| GET | `partner/orders` | Поставщик: заказы с его товарами |
+| PUT | `partner/orders/<id>` | Поставщик: смена статуса заказа (`state`: confirmed, assembled, sent, delivered, canceled) |
 
 Авторизованные запросы отправляются с заголовком `Authorization: Token <токен>`.

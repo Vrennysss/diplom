@@ -2,9 +2,9 @@ from django.urls import path
 
 from backend.views import (
     BasketView, CategoryListView, ConfirmEmailView, ContactView, LoginView,
-    OrderDetailView, OrderView, PasswordResetConfirmView,
-    PasswordResetView, ProductDetailView, ProductListView, RegisterView,
-    ShopListView,
+    OrderDetailView, OrderView, PartnerOrdersView, PartnerStateView,
+    PartnerUpdateView, PasswordResetConfirmView, PasswordResetView,
+    ProductDetailView, ProductListView, RegisterView, ShopListView,
 )
 
 app_name = 'backend'
@@ -28,4 +28,12 @@ urlpatterns = [
     path('order', OrderView.as_view(), name='order'),
     path('order/<int:pk>', OrderDetailView.as_view(),
          name='order-detail'),
+    path('partner/update', PartnerUpdateView.as_view(),
+         name='partner-update'),
+    path('partner/state', PartnerStateView.as_view(),
+         name='partner-state'),
+    path('partner/orders', PartnerOrdersView.as_view(),
+         name='partner-orders'),
+    path('partner/orders/<int:pk>', PartnerOrdersView.as_view(),
+         name='partner-order-state'),
 ]

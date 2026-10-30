@@ -2,7 +2,7 @@ from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
 from backend.models import (
-    Category, Contact, Order, OrderItem, ProductInfo, ProductParameter, Shop,
+    ORDER_STATE_CHOICES, Category, Contact, Order, OrderItem, ProductInfo, ProductParameter, Shop,
     User,
 )
 
@@ -130,3 +130,44 @@ class OrderSerializer(serializers.ModelSerializer):
 
 class OrderConfirmSerializer(serializers.Serializer):
     contact = serializers.IntegerField()
+
+
+class ShopStateSerializer(serializers.Serializer):
+    state = serializers.BooleanField()
+
+
+class PartnerOrderSerializer(serializers.ModelSerializer):
+    ordered_items = serializers.SerializerMethodField()
+    contact = ContactSerializer(read_only=True)
+    total_sum = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Order
+        fields = (
+            'id', 'state', 'dt', 'contact', 'ordered_items', 'total_sum',
+        )
+
+    def get_shop_items(self, order):
+        shop = self.context['shop']
+        return [
+            item for item in order.ordered_items.all()
+            if item.product_info.shop_id == shop.id
+        ]
+
+    def get_ordered_items(self, order):
+        return OrderItemSerializer(self.get_shop_items(order), many=True).data
+
+    def get_total_sum(self, order):
+        return sum(
+            item.quantity * item.product_info.price
+            for item in self.get_shop_items(order)
+        )
+
+
+class OrderStateSerializer(serializers.Serializer):
+    state = serializers.ChoiceField(
+        choices=[
+            choice for choice in ORDER_STATE_CHOICES
+            if choice[0] not in ('basket', 'new')
+        ]
+    )
