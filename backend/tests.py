@@ -10,7 +10,7 @@ from backend.models import (
     Category, ConfirmEmailToken, Contact, Order, OrderItem, ProductInfo,
     ProductParameter, Shop, User,
 )
-from backend.services import import_shop_file
+from backend.services import import_shop_data, import_shop_file
 
 
 class ImportTest(TestCase):
@@ -41,10 +41,14 @@ class AuthTest(APITestCase):
     }
 
     def register(self):
-        return self.client.post(reverse('backend:user-register'), self.user_data)
+        return self.client.post(
+            reverse('backend:user-register'), self.user_data
+        )
 
     def confirm(self):
-        token = ConfirmEmailToken.objects.get(user__email=self.user_data['email'])
+        token = ConfirmEmailToken.objects.get(
+            user__email=self.user_data['email']
+        )
         return self.client.post(
             reverse('backend:user-register-confirm'),
             {'email': self.user_data['email'], 'token': token.key},
@@ -120,7 +124,8 @@ class ProductTest(APITestCase):
         )
         self.assertTrue(response.json())
         self.assertTrue(
-            all(item['category'] == 'Смартфоны' for item in response.json())
+            all(item['category'] == 'Смартфоны'
+                for item in response.json())
         )
 
     def test_product_list_hides_closed_shop(self):
@@ -157,7 +162,8 @@ class BasketTest(APITestCase):
 
     def test_basket_requires_auth(self):
         self.client.force_authenticate(None)
-        self.assertEqual(self.client.get(reverse('backend:basket')).status_code, 401)
+        response = self.client.get(reverse('backend:basket'))
+        self.assertEqual(response.status_code, 401)
 
     def test_add_to_basket(self):
         self.assertEqual(self.add_to_basket(2).status_code, 201)
@@ -251,7 +257,9 @@ class OrderTest(APITestCase):
 
     def test_confirm_foreign_contact(self):
         self.add_to_basket()
-        other = User.objects.create_user(email='other@example.com', password='x')
+        other = User.objects.create_user(
+            email='other@example.com', password='x'
+        )
         contact = Contact.objects.create(
             user=other, city='Казань', street='Баумана', phone='1'
         )
@@ -367,3 +375,64 @@ class PartnerTest(APITestCase):
         )
         response = self.client.get(reverse('backend:partner-state'))
         self.assertEqual(response.status_code, 404)
+
+
+class ScenarioTest(APITestCase):
+    def test_full_scenario(self):
+        import_shop_file(settings.BASE_DIR / 'data' / 'shop1.yaml')
+        import_shop_data({
+            'shop': 'Второй магазин',
+            'categories': [{'id': 224, 'name': 'Смартфоны'}],
+            'goods': [{
+                'id': 1, 'category': 224, 'model': 'test/model',
+                'name': 'Тестовый смартфон', 'price': 1000,
+                'price_rrc': 1200, 'quantity': 5, 'parameters': {},
+            }],
+        })
+        email, password = 'client@example.com', 'Str0ng-pass-123'
+
+        self.client.post(reverse('backend:user-register'), {
+            'first_name': 'Пётр', 'last_name': 'Петров', 'email': email,
+            'password': password,
+        })
+        key = ConfirmEmailToken.objects.get().key
+        self.client.post(
+            reverse('backend:user-register-confirm'),
+            {'email': email, 'token': key},
+        )
+        token = self.client.post(
+            reverse('backend:user-login'),
+            {'email': email, 'password': password},
+        ).json()['token']
+        self.client.credentials(HTTP_AUTHORIZATION=f'Token {token}')
+
+        products = self.client.get(reverse('backend:products')).json()
+        shops = {product['shop'] for product in products}
+        self.assertEqual(len(shops), 2)
+        items = [
+            {'product_info': next(
+                p['id'] for p in products if p['shop'] == shop), 'quantity': 1}
+            for shop in shops
+        ]
+        self.client.post(
+            reverse('backend:basket'), {'items': items}, format='json'
+        )
+        contact = self.client.post(reverse('backend:user-contact'), {
+            'city': 'Москва', 'street': 'Тверская', 'house': '1',
+            'phone': '+79990000000',
+        })
+        self.assertEqual(contact.status_code, 201)
+        contact_id = self.client.get(
+            reverse('backend:user-contact')
+        ).json()[0]['id']
+
+        mail.outbox.clear()
+        response = self.client.post(
+            reverse('backend:order'), {'contact': contact_id}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(mail.outbox), 2)
+
+        orders = self.client.get(reverse('backend:order')).json()
+        self.assertEqual(len(orders), 1)
+        self.assertEqual(len(orders[0]['ordered_items']), 2)

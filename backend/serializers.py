@@ -2,8 +2,8 @@ from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 
 from backend.models import (
-    ORDER_STATE_CHOICES, Category, Contact, Order, OrderItem, ProductInfo, ProductParameter, Shop,
-    User,
+    ORDER_STATE_CHOICES, Category, Contact, Order, OrderItem, ProductInfo,
+    ProductParameter, Shop, User,
 )
 
 

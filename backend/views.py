@@ -104,9 +104,10 @@ class PasswordResetView(APIView):
             email=serializer.validated_data['email'], is_active=True
         ).first()
         if user is not None:
+            token = default_token_generator.make_token(user)
             send_mail(
                 'Сброс пароля',
-                f'Токен для сброса пароля: {default_token_generator.make_token(user)}',
+                f'Токен для сброса пароля: {token}',
                 settings.DEFAULT_FROM_EMAIL,
                 [user.email],
             )
@@ -193,10 +194,16 @@ class ContactView(APIView):
         return Response({'status': True}, status=status.HTTP_201_CREATED)
 
     def put(self, request):
-        contact = request.user.contacts.filter(id=request.data.get('id')).first()
+        contact = request.user.contacts.filter(
+            id=request.data.get('id')
+        ).first()
         if contact is None:
-            return error_response('Контакт не найден', status.HTTP_404_NOT_FOUND)
-        serializer = ContactSerializer(contact, data=request.data, partial=True)
+            return error_response(
+                'Контакт не найден', status.HTTP_404_NOT_FOUND
+            )
+        serializer = ContactSerializer(
+            contact, data=request.data, partial=True
+        )
         if not serializer.is_valid():
             return error_response(serializer.errors)
         serializer.save()
@@ -356,22 +363,23 @@ class PartnerUpdateView(APIView):
         return Response({'status': True, 'shop': shop.name})
 
 
+def shop_not_found():
+    return error_response('Магазин не найден', status.HTTP_404_NOT_FOUND)
+
+
 class PartnerStateView(APIView):
     permission_classes = [IsShop]
 
-    def get_shop(self, request):
-        return Shop.objects.filter(user=request.user).first()
-
     def get(self, request):
-        shop = self.get_shop(request)
+        shop = Shop.objects.filter(user=request.user).first()
         if shop is None:
-            return error_response('Магазин не найден', status.HTTP_404_NOT_FOUND)
+            return shop_not_found()
         return Response(ShopSerializer(shop).data)
 
     def post(self, request):
-        shop = self.get_shop(request)
+        shop = Shop.objects.filter(user=request.user).first()
         if shop is None:
-            return error_response('Магазин не найден', status.HTTP_404_NOT_FOUND)
+            return shop_not_found()
         serializer = ShopStateSerializer(data=request.data)
         if not serializer.is_valid():
             return error_response(serializer.errors)
@@ -397,7 +405,7 @@ class PartnerOrdersView(APIView):
     def get(self, request):
         shop = Shop.objects.filter(user=request.user).first()
         if shop is None:
-            return error_response('Магазин не найден', status.HTTP_404_NOT_FOUND)
+            return shop_not_found()
         orders = self.get_shop_orders(shop)
         return Response(
             PartnerOrderSerializer(
@@ -408,7 +416,7 @@ class PartnerOrdersView(APIView):
     def put(self, request, pk):
         shop = Shop.objects.filter(user=request.user).first()
         if shop is None:
-            return error_response('Магазин не найден', status.HTTP_404_NOT_FOUND)
+            return shop_not_found()
         order = get_object_or_404(self.get_shop_orders(shop), pk=pk)
         serializer = OrderStateSerializer(data=request.data)
         if not serializer.is_valid():
